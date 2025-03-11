@@ -24,7 +24,7 @@ class WMS:
         self.login_url = 'http://www.rktrac.com/Warehousing/Login.aspx'
         self.inbound_url = 'http://www.rktrac.com/Warehousing/WarehouseReceipts.aspx'
         self.outbound_url = 'http://www.rktrac.com/Warehousing/WarehouseOrders.aspx'
-        self.download_dir = "/Users/yifei/Desktop/containers_tracker"
+        self.download_dir = os.getcwd()  # Change download path to current path
         self.driver = None
         self.setup_driver()
         
@@ -58,11 +58,11 @@ class WMS:
 
         # gdrive credentials
         self.scopes = ['https://www.googleapis.com/auth/drive']
-        self.service_account_file = '/Users/yifei/Desktop/containers_tracker/containers-tracker-7a3e240ebb06.json'
+        self.service_account_file = 'containers-tracker-7a3e240ebb06.json'
 
         # gdrive file ID
         self.file_id = '1YZVFa8WDHwZsMnbCu8qwzfThAjrkWTDYrbAgY9aC9bU'
-        self.file_path = '/Users/yifei/Desktop/containers_tracker/inbound.xls'
+        self.file_path = os.path.join(self.download_dir, 'inventory.xlsx')  # Update file path to current directory
         self.mime_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
         # In __init__, add these new field names:
@@ -73,11 +73,9 @@ class WMS:
         self._order_save_name = "SaveOrder"
 
     def setup_driver(self):
-        if not os.path.exists(self.download_dir):
-            os.makedirs(self.download_dir)
         chrome_options = Options()
         chrome_options.add_experimental_option("prefs", {
-            "download.default_directory": self.download_dir,
+            "download.default_directory": self.download_dir,  # Set the default download directory
             "download.prompt_for_download": False,
             "download.directory_upgrade": True,
             "safebrowsing.enabled": True
@@ -111,17 +109,6 @@ class WMS:
             print(f"Login failed: {str(e)}")
             return False
 
-    def navigate_to_receipt(self):
-        try:
-            warehouse_menu = WebDriverWait(self.driver, 10).until(
-                EC.visibility_of_element_located((By.XPATH, "//a[text()='Warehouse']")))
-            receipts_link = WebDriverWait(self.driver, 10).until(
-                EC.visibility_of_element_located((By.XPATH, "//a[text()='Receipts']")))
-
-            receipts_link.click()
-        except Exception as e:
-            print(f"Navigation failed: {str(e)}")
-
     def query_inventory(self):
         try:
             self.driver.get(self.inbound_url)
@@ -136,13 +123,14 @@ class WMS:
                 EC.element_to_be_clickable((By.NAME, 'ctl07$SearchResultsDataGridController$SearchResultsDataGrid_ExcelButton')))
             export_btn.click()
 
-            time.sleep(10)
+            time.sleep(5)
 
-            new_filename = 'inbound.xls'
+            new_filename = 'inventory.xlsx'  
             os.rename(os.path.join(self.download_dir, 'SearchResults.xls'), os.path.join(self.download_dir, new_filename))
             return True
 
         except Exception as e:
+            print(f"Error querying inventory: {str(e)}")
             return False
 
     def create_inbound(self, container='', product='', num_pallets=22):
@@ -232,9 +220,9 @@ class WMS:
 
 
             # Save the receipt
-            # save = WebDriverWait(self.driver, 2).until(
-            #     EC.element_to_be_clickable((By.NAME, self._save_name)))
-            # save.click()
+            save = WebDriverWait(self.driver, 2).until(
+                EC.element_to_be_clickable((By.NAME, self._save_name)))
+            save.click()
             time.sleep(3)
             return True
             
@@ -332,9 +320,9 @@ class WMS:
             container_field.send_keys(container)
 
             # Save the order
-            # save = WebDriverWait(self.driver, 2).until(
-            #     EC.element_to_be_clickable((By.NAME, self._order_save_name)))
-            # save.click()
+            save = WebDriverWait(self.driver, 2).until(
+                EC.element_to_be_clickable((By.NAME, self._order_save_name)))
+            save.click()
             time.sleep(3)
             return True
             
