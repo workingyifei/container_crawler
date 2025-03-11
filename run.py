@@ -46,7 +46,7 @@ def main():
             if args.containers:
                 print("Creating outbound orders...")
                 for i in range(len(args.containers)):
-                    if wms.create_outbound(args.containers[i], args.date[i], args.outbound):
+                    if wms.create_outbound(args.containers[i], args.product, args.date[i], args.outbound):
                         print(f"container {args.containers[i]} order creation: SUCCESS.")
                     else:
                         print(f"container {args.containers[i]} order creation: FAILED.")
