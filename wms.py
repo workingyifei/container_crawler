@@ -24,7 +24,7 @@ class WMS:
         self.login_url = 'http://www.example.com/login'  # Example login URL
         self.inbound_url = 'http://www.example.com/inbound'  # Example inbound URL
         self.outbound_url = 'http://www.example.com/outbound'  # Example outbound URL
-        self.download_dir = "/path/to/download/directory"  # Example download directory
+        self.download_dir = os.getcwd()  # Change download path to current path
         self.driver = None
         self.setup_driver()
         
@@ -48,6 +48,12 @@ class WMS:
         self._order_number_name = "OrderNumber"
         self._required_date = "RequiredByDate$ctl00$TextBox"
         self._total_units_name = "TotalUnits"
+        self._order_line_id = 'WhsOrderLinesGrid_ctl02_ga'
+        self._order_line_product_name = 'WhsOrderLinesGrid$ctl02$ctl00$TextBox'
+        self._order_line_packs_name = 'WhsOrderLinesGrid$ctl02$OrderLinePacks'      
+        self._order_line_packs_unit_name = 'WhsOrderLinesGrid$ctl02$OrderLinePackType'
+        self._order_line_quantity_name = 'WhsOrderLinesGrid$ctl02$OrderLineUnits'
+        self._order_line_container_name = 'WhsOrderLinesGrid$ctl02$ctl04'
         self._order_update = "SaveOrder"
 
         # gdrive credentials
@@ -55,8 +61,8 @@ class WMS:
         self.service_account_file = '/path/to/service_account.json'  # Example service account file path
 
         # gdrive file ID
-        self.file_id = 'example_file_id'  # Example file ID
-        self.file_path = '/path/to/file/inbound.xls'  # Example file path
+        self.file_id = 'example_file_id' # Example file ID
+        self.file_path = os.path.join(self.download_dir, 'inventory.xlsx')  # Update file path to current directory
         self.mime_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
         # In __init__, add these new field names:
@@ -67,11 +73,9 @@ class WMS:
         self._order_save_name = "SaveOrder"
 
     def setup_driver(self):
-        if not os.path.exists(self.download_dir):
-            os.makedirs(self.download_dir)
         chrome_options = Options()
         chrome_options.add_experimental_option("prefs", {
-            "download.default_directory": self.download_dir,
+            "download.default_directory": self.download_dir,  # Set the default download directory
             "download.prompt_for_download": False,
             "download.directory_upgrade": True,
             "safebrowsing.enabled": True
@@ -105,17 +109,6 @@ class WMS:
             print(f"Login failed: {str(e)}")
             return False
 
-    def navigate_to_receipt(self):
-        try:
-            warehouse_menu = WebDriverWait(self.driver, 10).until(
-                EC.visibility_of_element_located((By.XPATH, "//a[text()='Warehouse']")))
-            receipts_link = WebDriverWait(self.driver, 10).until(
-                EC.visibility_of_element_located((By.XPATH, "//a[text()='Receipts']")))
-
-            receipts_link.click()
-        except Exception as e:
-            print(f"Navigation failed: {str(e)}")
-
     def query_inventory(self):
         try:
             self.driver.get(self.inbound_url)
@@ -130,14 +123,14 @@ class WMS:
                 EC.element_to_be_clickable((By.NAME, 'ctl07$SearchResultsDataGridController$SearchResultsDataGrid_ExcelButton')))
             export_btn.click()
 
-            time.sleep(10)
+            time.sleep(5)
 
-            # TODO: search for latest download instead of 'SearchResults.xls'
-            new_filename = 'inbound.xls'
+            new_filename = 'inventory.xlsx'  
             os.rename(os.path.join(self.download_dir, 'SearchResults.xls'), os.path.join(self.download_dir, new_filename))
             return True
 
         except Exception as e:
+            print(f"Error querying inventory: {str(e)}")
             return False
 
     def create_inbound(self, container='', product='', num_pallets=22):
@@ -238,12 +231,13 @@ class WMS:
             return False
 
     
-    def create_outbound(self, container='', date='', num_pallets=22):
+    def create_outbound(self, container='', product='', date='', num_pallets=22):
         """
         Create a new outbound order.
         
         Args:
             container (str): Container/order reference number
+            product (str): Product name or identifier
             date (str): Required delivery date
             num_pallets (int): Number of pallets (default: 22)
         
@@ -255,35 +249,76 @@ class WMS:
             self.driver.get(self.outbound_url)
             
             # Click Place New Order button
-            new_order = WebDriverWait(self.driver, 2).until(
+            new_order = WebDriverWait(self.driver, 2).until(  
                 EC.element_to_be_clickable((By.NAME, self._new_order_btn_name)))
             new_order.click()
             
             # Select HAYMAN WAREHOUSE
-            warehouse_select = Select(WebDriverWait(self.driver, 2).until(
+            warehouse_select = Select(WebDriverWait(self.driver, 2).until(  
                 EC.presence_of_element_located((By.NAME, self._order_warehouse_select_name))))
             warehouse_select.select_by_visible_text('HAYMAN WAREHOUSE')
             
             # Set Order Number (container number)
-            order_number = WebDriverWait(self.driver, 2).until(
+            order_number = WebDriverWait(self.driver, 2).until(  
                 EC.visibility_of_element_located((By.NAME, self._order_number_name)))
             order_number.clear()
             order_number.send_keys(container)
             
             # Set Required Date
-            required_date = WebDriverWait(self.driver, 2).until(
+            required_date = WebDriverWait(self.driver, 2).until( 
                 EC.visibility_of_element_located((By.NAME, self._required_date_name)))
             required_date.clear()
             required_date.send_keys(date)
-            time.sleep(2)
             
             # Set Total Units (pallets * 60)
-            total_units = WebDriverWait(self.driver, 2).until(
+            total_units = WebDriverWait(self.driver, 5).until(  
                 EC.visibility_of_element_located((By.NAME, self._order_total_units_name)))
             total_units.clear()
-            total_units.send_keys(int(num_pallets) * 60)
-            time.sleep(2)
-            
+            total_units.send_keys(str(num_pallets * 60))
+
+            # Click Add Line button
+            add_line_btn = WebDriverWait(self.driver, 5).until( 
+                EC.element_to_be_clickable((By.ID, self._order_line_id)))
+            add_line_btn.click()
+            time.sleep(1)
+
+            # Fill in Product   
+            product_field = WebDriverWait(self.driver, 5).until(  
+                EC.visibility_of_element_located((By.NAME, self._order_line_product_name)))
+            product_field.clear()
+            product_field.send_keys(product)
+            time.sleep(1)
+
+
+            # Fill in Packs
+            packs_field = WebDriverWait(self.driver, 5).until(  
+                EC.visibility_of_element_located((By.NAME, self._order_line_packs_name)))
+            packs_field.clear()
+            packs_field.send_keys(int(num_pallets) * 60)
+            time.sleep(1)
+
+
+            # Fill in Pack unit 
+            packs_unit_field = Select(WebDriverWait(self.driver, 5).until(  
+                EC.visibility_of_element_located((By.NAME, self._order_line_packs_unit_name))))
+            packs_unit_field.select_by_visible_text('Unit')
+            time.sleep(1)
+
+
+            # Fill in Quantity
+            quantity_field = WebDriverWait(self.driver, 5).until(  
+                EC.visibility_of_element_located((By.NAME, self._order_line_quantity_name)))
+            quantity_field.clear()
+            quantity_field.send_keys(int(num_pallets) * 60)
+            time.sleep(1)
+
+
+            # Fill in Container
+            container_field = WebDriverWait(self.driver, 5).until(  
+                EC.visibility_of_element_located((By.NAME, self._order_line_container_name)))
+            container_field.clear()
+            container_field.send_keys(container)
+
             # Save the order
             save = WebDriverWait(self.driver, 2).until(
                 EC.element_to_be_clickable((By.NAME, self._order_save_name)))
