@@ -75,12 +75,36 @@ class TerminalChecker:
             chrome_options.add_argument('--disable-infobars')
             chrome_options.add_argument('--disable-notifications')
             chrome_options.add_argument('--disable-popup-blocking')
+            chrome_options.add_argument('--disable-logging')
+            chrome_options.add_argument('--log-level=3')
+            chrome_options.add_argument('--disable-images')
+            chrome_options.add_argument('--blink-settings=imagesEnabled=false')
+            chrome_options.add_argument('--disable-javascript')  # Disable JavaScript for faster loading
+            chrome_options.add_argument('--disable-css-animations')  # Disable CSS animations
+            chrome_options.add_argument('--disable-web-security')  # Disable web security for faster loading
+            chrome_options.add_argument('--disable-features=IsolateOrigins,site-per-process')  # Disable site isolation
             chrome_options.page_load_strategy = 'eager'  # Don't wait for all resources to load
         
         self.driver = webdriver.Chrome(options=chrome_options)
-        self.driver.set_page_load_timeout(30)  # Set page load timeout
-        self.driver.implicitly_wait(5)  # Reduce implicit wait time
-        
+        # self.driver.set_page_load_timeout(10)  # Reduced to 10 seconds
+        # self.driver.implicitly_wait(1)  # Reduced to 1 second
+
+    def wait_for_element(self, by, value, timeout=2, condition=EC.presence_of_element_located):
+        """Helper method for explicit waits with shorter timeouts"""
+        try:
+            element = WebDriverWait(self.driver, timeout).until(condition((by, value)))
+            return element
+        except TimeoutException:
+            return None
+
+    def wait_for_elements(self, by, value, timeout=2, condition=EC.presence_of_all_elements_located):
+        """Helper method for explicit waits with shorter timeouts for multiple elements"""
+        try:
+            elements = WebDriverWait(self.driver, timeout).until(condition((by, value)))
+            return elements
+        except TimeoutException:
+            return []
+
     def close(self):
         """Close the WebDriver"""
         if self.driver:
@@ -109,257 +133,215 @@ class TrapacChecker(TerminalChecker):
     def check_containers(self, container_numbers):
         results = []
         try:
-            # Navigate directly to the quick check page with parameters
-            self.driver.get(self.base_url)
-            time.sleep(2)  # Increased initial wait time
-            
-            # Try to close the privacy policy modal if it appears
-            try:
-                # Try multiple selectors for the close button
-                close_button = None
-                selectors = [
-                    "button.close",
-                    "//button[contains(text(), 'Close')]",
-                    "//button[@class='close']",
-                    "//button[@aria-label='Close']"
-                ]
+            # Process containers in batches of 10
+            batch_size = 10
+            for i in range(0, len(container_numbers), batch_size):
+                batch = container_numbers[i:i + batch_size]
+                logger.info(f"Processing batch {i//batch_size + 1} of {(len(container_numbers) + batch_size - 1)//batch_size}")
                 
-                for selector in selectors:
-                    try:
-                        if selector.startswith("//"):
-                            close_button = WebDriverWait(self.driver, 2).until(
-                                EC.element_to_be_clickable((By.XPATH, selector))
-                            )
-                        else:
-                            close_button = WebDriverWait(self.driver, 2).until(
-                                EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
-                            )
-                        if close_button:
-                            close_button.click()
-                            time.sleep(1)  # Wait for modal to close
-                            logger.info(f"Privacy policy modal closed using selector: {selector}")
+                # Navigate directly to the quick check page with parameters
+                self.driver.get(self.base_url)
+                time.sleep(2)
+                
+                # Try to close the privacy policy modal if it appears
+                try:
+                    selectors = [
+                        "button.close",
+                        "//button[contains(text(), 'Close')]",
+                        "//button[@class='close']",
+                        "//button[@aria-label='Close']"
+                    ]
+                    
+                    for selector in selectors:
+                        try:
+                            if selector.startswith("//"):
+                                close_button = self.wait_for_element(By.XPATH, selector, timeout=1, condition=EC.element_to_be_clickable)
+                            else:
+                                close_button = self.wait_for_element(By.CSS_SELECTOR, selector, timeout=1, condition=EC.element_to_be_clickable)
+                            if close_button:
+                                close_button.click()
+                                logger.info(f"Privacy policy modal closed using selector: {selector}")
+                                break
+                        except Exception:
+                            continue
+                            
+                except Exception:
+                    logger.info("No privacy policy modal found or already closed")
+
+                # Enter container numbers in the containers textarea
+                try:
+                    container_input = self.wait_for_element(By.NAME, "containers", timeout=1)
+                    if container_input:
+                        container_input.clear()
+                        container_input.send_keys("\n".join(batch))
+                        logger.info(f"Entered container numbers: {batch}")
+                        time.sleep(5)
+                    else:
+                        raise Exception("Container input field not found")
+                    
+                except Exception as e:
+                    logger.error(f"Error entering container numbers: {str(e)}")
+                    raise
+
+                # Click the Check button
+                try:
+                    submit_button = self.wait_for_element(By.XPATH, "//div[@class='submit']/button", timeout=1, condition=EC.element_to_be_clickable)
+                    if submit_button:
+                        submit_button.click()
+                        logger.info("Clicked submit button")
+                        time.sleep(5)
+                    else:
+                        raise Exception("Submit button not found")
+                    
+                except Exception as e:
+                    logger.error(f"Error clicking submit button: {str(e)}")
+                    raise
+
+                # Check if reCAPTCHA is present and handle it
+                try:
+                    recaptcha_present = False
+                    recaptcha_selectors = [
+                        "//iframe[contains(@src, 'recaptcha')]",
+                        "//div[@class='g-recaptcha']",
+                        "//div[contains(@class, 'recaptcha')]",
+                        "//div[@id='recaptcha-backup']"
+                    ]
+                    
+                    for selector in recaptcha_selectors:
+                        elements = self.driver.find_elements(By.XPATH, selector)
+                        if elements:
+                            for element in elements:
+                                try:
+                                    if element.is_displayed():
+                                        recaptcha_present = True
+                                        logger.info(f"Found visible reCAPTCHA element using selector: {selector}")
+                                        break
+                                except:
+                                    continue
+                        if recaptcha_present:
                             break
-                    except Exception:
-                        continue
-                        
-            except Exception:
-                logger.info("No privacy policy modal found or already closed")
-
-            # Enter container numbers in the containers textarea
-            try:
-                container_input = WebDriverWait(self.driver, 2).until(  
-                    EC.presence_of_element_located((By.NAME, "containers"))
-                )
-                container_input.clear()
-                container_input.send_keys(",".join(container_numbers))
-                logger.info(f"Entered container numbers: {container_numbers}")
-                
-            except Exception as e:
-                logger.error(f"Error entering container numbers: {str(e)}")
-                raise
-
-            # Check if reCAPTCHA is present and handle it
-            try:
-                recaptcha_present = False
-                recaptcha_selectors = [
-                    "//iframe[contains(@src, 'recaptcha')]",
-                    "//div[@class='g-recaptcha']",
-                    "//div[contains(@class, 'recaptcha')]",
-                    "//div[@id='recaptcha-backup']"
-                ]
-                
-                # Log the current state before checking
-                logger.info("Starting reCAPTCHA detection...")
-                
-                for selector in recaptcha_selectors:
-                    elements = self.driver.find_elements(By.XPATH, selector)
-                    if elements:
-                        # Check if the elements are actually visible
-                        for element in elements:
-                            try:
-                                if element.is_displayed():
-                                    recaptcha_present = True
-                                    logger.info(f"Found visible reCAPTCHA element using selector: {selector}")
-                                    break
-                                else:
-                                    logger.debug(f"Found reCAPTCHA element but it's not visible: {selector}")
-                            except:
-                                logger.debug(f"Error checking visibility for element with selector: {selector}")
-                                continue
                     
                     if recaptcha_present:
-                        break
-                
-                logger.info(f"reCAPTCHA detection result: {'Present' if recaptcha_present else 'Not Present'}")
-                
-                if recaptcha_present:
-                    logger.warning("reCAPTCHA verification required. Please complete the verification manually.")
-                    print("\nreCAPTCHA verification required for Trapac. Please complete the verification manually in the browser window.")
-                    print("After completing the verification, the script will automatically continue.")
-                    print("You have 5 minutes to complete the verification.")
-                    
-                    # Wait for recaptcha to be solved (max 5 minutes)
-                    max_wait = 300  # 5 minutes
-                    start_time = time.time()
-                    
-                    while time.time() - start_time < max_wait:
-                        recaptcha_still_present = False
-                        for selector in recaptcha_selectors:
-                            elements = self.driver.find_elements(By.XPATH, selector)
-                            if elements:
-                                for element in elements:
-                                    try:
-                                        if element.is_displayed():
-                                            recaptcha_still_present = True
-                                            break
-                                    except:
-                                        continue
+                        logger.warning("reCAPTCHA verification required. Please complete the verification manually.")
+                        print("\nreCAPTCHA verification required for Trapac. Please complete the verification manually in the browser window.")
+                        print("After completing the verification, please click the Check button.")
+                        print("The script will automatically continue once the results are displayed.")
+                        print("You have 5 minutes to complete the verification.")
+                        
+                        max_wait = 300  # 5 minutes
+                        start_time = time.time()
+                        
+                        while time.time() - start_time < max_wait:
+                            # Check for results table or no results message
+                            table = self.wait_for_element(By.XPATH, "//div[@class='transaction-result availability']//table", timeout=1)
                             
-                            if recaptcha_still_present:
+                            if table:
+                                logger.info("Results found after reCAPTCHA verification")
                                 break
-                        
-                        if not recaptcha_still_present:
-                            logger.info("reCAPTCHA verification completed.")
-                            time.sleep(2)  # Wait for page to update after verification
-                            break
                             
-                        time.sleep(1)  # Check every second
-                        
-                        # Log progress every 30 seconds
-                        elapsed = time.time() - start_time
-                        if elapsed % 30 < 1:
-                            logger.info(f"Still waiting for reCAPTCHA verification... ({int(max_wait - elapsed)} seconds remaining)")
-                    
-                    if time.time() - start_time >= max_wait:
-                        logger.error("reCAPTCHA verification timeout")
-                        raise TimeoutException("reCAPTCHA verification timeout")
-                else:
-                    logger.info("No reCAPTCHA detected, proceeding with container check.")
-                
-            except Exception as e:
-                logger.error(f"Error handling reCAPTCHA: {str(e)}")
-                raise
-                
-            # Click the Check button
-            try:
-                submit_button = WebDriverWait(self.driver, 2).until(
-                    EC.element_to_be_clickable((By.XPATH, "//div[@class='submit']/button"))
-                )
-                submit_button.click()
-                logger.info("Clicked submit button")
-                
-            except Exception as e:
-                logger.error(f"Error clicking submit button: {str(e)}")
-                raise
-
-            # Wait for results to load and add explicit wait for table
-            time.sleep(5)  # Increase wait time slightly
-            
-            # Select the results table using the specified selector
-            try:
-                # Wait for table to be present
-                table = WebDriverWait(self.driver, 2).until(
-                    EC.presence_of_element_located((By.XPATH, "//div[@class='table-scroll']//table"))
-                )
-                logger.info("Found results table with XPath: //div[@class='table-scroll']//table")
-            except Exception as e:
-                logger.error(f"Could not find the results table: {str(e)}")
-                # Check if there's a "no results" message
-                no_results_elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'No result found')]")
-                if no_results_elements:
-                    logger.info("No results found message displayed")
-                    # Add all containers as NOT FOUND
-                    for container in container_numbers:
-                        results.append(ContainerStatus(container, terminal="NOT FOUND"))
-                    return results
-                raise  # Re-raise the exception if no "no results" message found
-                
-            # Get all rows
-            rows = table.find_elements(By.TAG_NAME, "tr")
-            
-            # Log the number of rows found
-            logger.info(f"Found {len(rows)} rows in the results table")
-            
-            # Skip header row if there are more than 1 rows
-            if len(rows) > 1:
-                rows = rows[1:]
-                logger.info(f"Processing {len(rows)} data rows after skipping header")
-            
-            # Process each row
-            for row_index, row in enumerate(rows):
-                try:
-                    # Get all columns in the row
-                    cols = row.find_elements(By.TAG_NAME, "td")
-                    
-                    # Skip rows with class 'th-second', 'row-final', or 'row-payment'
-                    row_class = row.get_attribute('class')
-                    if row_class in ['th-second', 'row-final', 'row-payment']:
-                        logger.info(f"Skipping UI row with class: {row_class}")
-                        continue
-                    
-                    # If only one column, check if it's a "not found" message
-                    if len(cols) == 1:
-                        message_text = cols[0].text.strip()
-                        
-                        # Only process if it's a "No result found" message
-                        if "No result found for the reference number:" in message_text:
-                            # Extract container number from the message
-                            container = message_text.split(":")[1].strip()
-                            results.append(ContainerStatus(
-                                container,
-                                terminal="NOT FOUND"
-                            ))
-                            logger.info(f"Added container {container} as NOT FOUND from row {row_index + 1}")
-                        continue
-                    
-                    # For normal data rows, verify we have enough columns and it's a container row
-                    if len(cols) >= 9 and cols[0].text.strip() == "Container":
-                        try:
-                            # Log each column's content before processing
-                            column_contents = [col.text.strip() for col in cols]
+                            time.sleep(1)
                             
-                            container = cols[1].text.strip()
-                            # Remove the <strong> tags if present
-                            container = container.replace('<strong>', '').replace('</strong>', '')
-                            
-                            line_op = cols[2].text.strip()
-                            line_hold = cols[3].text.strip()
-                            customs_hold = cols[4].text.strip()
-                            cbpa_hold = cols[5].text.strip()
-                            terminal_hold = cols[6].text.strip()
-                            location = cols[7].text.strip()
-                            dimensions = cols[8].text.strip()
-
-                            # Create a ContainerStatus object and add it to the results
-                            results.append(ContainerStatus(
-                                container,
-                                terminal=self.terminal_name,
-                                line_operator=line_op,
-                                dimensions=dimensions,
-                                customs_hold=customs_hold,
-                                line_hold=line_hold,
-                                cbpa_hold=cbpa_hold,
-                                terminal_hold=terminal_hold,
-                                location=location
-                            ))
-                            logger.info(f"Successfully processed container {container} from row {row_index + 1}")
-                        except IndexError as e:
-                            logger.error(f"Error accessing column data in row {row_index + 1}: {str(e)}")
-                            logger.error(f"Available columns: {[col.text.strip() for col in cols]}")
-                            continue
+                            if (time.time() - start_time) % 30 < 1:
+                                logger.info(f"Still waiting for results... ({int(max_wait - (time.time() - start_time))} seconds remaining)")
+                        
+                        if time.time() - start_time >= max_wait:
+                            raise TimeoutException("Timeout waiting for results after reCAPTCHA verification")
+                    
                 except Exception as e:
-                    logger.error(f"Error processing row {row_index + 1}: {str(e)}")
-                    continue
+                    logger.error(f"Error handling reCAPTCHA: {str(e)}")
+                    raise
+                    
+                # Wait for results table
+                try:
+                    table = self.wait_for_element(By.XPATH, "//div[@class='table-scroll']//table", timeout=2)
+                    if not table:
+                        no_results = self.wait_for_elements(By.XPATH, "//*[contains(text(), 'No result found')]", timeout=1)
+                        if no_results:
+                            logger.info("No results found message displayed")
+                            for container in batch:
+                                results.append(ContainerStatus(container, terminal="NOT FOUND"))
+                            continue
+                        raise Exception("Results table not found")
+                    
+                    logger.info("Found results table")
+                    
+                    # Get tbody rows (skip thead)
+                    tbody = table.find_element(By.TAG_NAME, "tbody")
+                    rows = tbody.find_elements(By.TAG_NAME, "tr")
+                    
+                    # Process each row
+                    for row in rows:
+                        try:
+                            # Check row class
+                            row_class = row.get_attribute('class')
+                            
+                            # Handle error rows (not found containers)
+                            if row_class == "error-row":
+                                cols = row.find_elements(By.TAG_NAME, "td")
+                                if cols and len(cols) > 0:
+                                    message_text = cols[0].text.strip()
+                                    if "No result found for the reference number:" in message_text or "is not an Inbound Container" in message_text:
+                                        try:
+                                            container = message_text.split(":")[1].strip()
+                                        except IndexError:
+                                            # If splitting by ":" fails, try to extract container number from the message
+                                            container = message_text.split()[0].strip()
+                                        results.append(ContainerStatus(container, terminal="NOT FOUND"))
+                                continue
+                            
+                            # Handle found containers (row-odd class)
+                            if row_class == "row-odd":
+                                cols = row.find_elements(By.TAG_NAME, "td")
+                                if len(cols) >= 9:
+                                    try:
+                                        container = cols[1].text.strip().replace('<strong>', '').replace('</strong>', '')
+                                        location = cols[7].text.strip() if len(cols) > 7 else ""
+                                        customs_hold = cols[4].text.strip() if len(cols) > 4 else ""
+                                        line_hold = cols[3].text.strip() if len(cols) > 3 else ""
+                                        cbpa_hold = cols[5].text.strip() if len(cols) > 5 else ""
+                                        terminal_hold = cols[6].text.strip() if len(cols) > 6 else ""
+                                        
+                                        # Determine availability status
+                                        available = ""
+                                        if "Delivered" in location:
+                                            available = "Delivered"
+                                        elif (not customs_hold or customs_hold.lower() == "released") and \
+                                             (not line_hold or line_hold.lower() == "released") and \
+                                             (not cbpa_hold or cbpa_hold.lower() == "released") and \
+                                             (not terminal_hold or terminal_hold.lower() == "none"):
+                                            available = "Available"
+                                        
+                                        results.append(ContainerStatus(
+                                            container,
+                                            terminal=self.terminal_name,
+                                            available=available,
+                                            line_operator=cols[2].text.strip() if len(cols) > 2 else "",
+                                            dimensions=cols[8].text.strip() if len(cols) > 8 else "",
+                                            customs_hold=customs_hold,
+                                            line_hold=line_hold,
+                                            cbpa_hold=cbpa_hold,
+                                            terminal_hold=terminal_hold,
+                                            location=location
+                                        ))
+                                    except Exception as e:
+                                        logger.error(f"Error processing container data: {str(e)}")
+                                        continue
+                        except Exception as e:
+                            logger.error(f"Error processing row: {str(e)}")
+                            continue
+                            
+                except Exception as e:
+                    logger.error(f"Error processing results: {str(e)}")
+                    raise
 
         except Exception as e:
             logger.error(f"Error checking containers at Trapac: {str(e)}")
 
-        # Add any containers that weren't found in the results
+        # Add any containers that weren't found
         found_containers = {r.container_number for r in results}
         for container in container_numbers:
             if container not in found_containers:
                 results.append(ContainerStatus(container, terminal="NOT FOUND"))
-                logger.info(f"Container {container} not found, adding as NOT FOUND")
 
         return results
 
@@ -377,45 +359,45 @@ class TideworksChecker(TerminalChecker):
         try:
             self.driver.get(self.base_url)
             
-            # Try to close any privacy policy or popup with multiple selectors
-            try:
-                selectors = [
-                    "//button[contains(text(), 'Close')]",
-                    "//button[@class='close']",
-                    "//button[@aria-label='Close']",
-                    "//button[contains(@class, 'close')]",
-                    "//div[contains(@class, 'modal')]//button[contains(text(), 'Close')]",
-                    "//div[contains(@class, 'modal')]//button[@class='close']",
-                    "//div[contains(@class, 'popup')]//button[contains(text(), 'Close')]",
-                    "//div[contains(@class, 'dialog')]//button[contains(text(), 'Close')]"
-                ]
+            # # Try to close any privacy policy or popup with multiple selectors
+            # try:
+            #     selectors = [
+            #         "//button[contains(text(), 'Close')]",
+            #         "//button[@class='close']",
+            #         "//button[@aria-label='Close']",
+            #         "//button[contains(@class, 'close')]",
+            #         "//div[contains(@class, 'modal')]//button[contains(text(), 'Close')]",
+            #         "//div[contains(@class, 'modal')]//button[@class='close']",
+            #         "//div[contains(@class, 'popup')]//button[contains(text(), 'Close')]",
+            #         "//div[contains(@class, 'dialog')]//button[contains(text(), 'Close')]"
+            #     ]
                 
-                for selector in selectors:
-                    try:
-                        close_buttons = WebDriverWait(self.driver, 2).until(
-                            EC.presence_of_all_elements_located((By.XPATH, selector))
-                        )
-                        for button in close_buttons:
-                            try:
-                                if button.is_displayed() and button.is_enabled():
-                                    # Try to click using JavaScript if regular click fails
-                                    try:
-                                        button.click()
-                                    except:
-                                        self.driver.execute_script("arguments[0].click();", button)
-                                    time.sleep(1)  # Wait for modal to close
-                                    logger.info(f"Privacy/popup closed using selector: {selector}")
-                            except:
-                                continue
-                    except:
-                        continue
+            #     for selector in selectors:
+            #         try:
+            #             close_buttons = WebDriverWait(self.driver, 2).until(
+            #                 EC.presence_of_all_elements_located((By.XPATH, selector))
+            #             )
+            #             for button in close_buttons:
+            #                 try:
+            #                     if button.is_displayed() and button.is_enabled():
+            #                         # Try to click using JavaScript if regular click fails
+            #                         try:
+            #                             button.click()
+            #                         except:
+            #                             self.driver.execute_script("arguments[0].click();", button)
+            #                         time.sleep(1)  # Wait for modal to close
+            #                         logger.info(f"Privacy/popup closed using selector: {selector}")
+            #                 except:
+            #                     continue
+            #         except:
+            #             continue
                 
-            except Exception as e:
-                logger.info(f"No privacy policy or popup found or already closed: {str(e)}")
+            # except Exception as e:
+            #     logger.info(f"No privacy policy or popup found or already closed: {str(e)}")
             
             # Check if we need to log in with a shorter timeout
             try:
-                login_elements = WebDriverWait(self.driver, 3).until(
+                login_elements = WebDriverWait(self.driver, 1).until(
                     EC.presence_of_element_located((By.ID, "j_username"))
                 )
                 
@@ -431,7 +413,7 @@ class TideworksChecker(TerminalChecker):
                 login_button.click()
                 
                 # Check if login was successful with a short timeout
-                error_elements = WebDriverWait(self.driver, 2).until(
+                error_elements = WebDriverWait(self.driver, 1).until(
                     EC.presence_of_all_elements_located((By.XPATH, "//*[contains(text(), 'Invalid username or password')]"))
                 )
                 if error_elements:
@@ -468,7 +450,7 @@ class TideworksChecker(TerminalChecker):
 
             try:
                 # Wait for the page to load completely
-                time.sleep(5)
+                # time.sleep(5)
                 
                 # Click the Import button in the menu
                 menu_button = WebDriverWait(self.driver, 3).until(
@@ -525,7 +507,7 @@ class TideworksChecker(TerminalChecker):
                                 container,
                                 terminal="NOT FOUND"
                             ))
-                            logger.info(f"Container {container} not found")
+                            logger.info(f"Container {container} not found at {self.terminal_name}")
                             continue
                             
                         # Process normal row with container information
@@ -736,6 +718,7 @@ def main():
     parser.add_argument('--headless', action='store_true', help='Run in headless mode')
     parser.add_argument('--output', choices=['csv', 'json', 'table'], default='table', help='Output format')
     parser.add_argument('--output-file', help='Output file path')
+    parser.add_argument('--parallel', action='store_true', help='Run terminal checks in parallel')
     args = parser.parse_args()
     
     # Normalize container numbers (strip whitespace and convert to uppercase)
@@ -759,41 +742,60 @@ def main():
     
     # Initialize container results dictionary
     container_results = {}
-    remaining_containers = container_numbers.copy()
     
-    # Check containers across all terminals sequentially
-    for checker in checkers:
-        try:
-            if not remaining_containers:  # Skip if no containers left to check
-                break
+    if args.parallel:
+        # Run all terminal checks in parallel
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            future_to_checker = {
+                executor.submit(check_terminal, checker, container_numbers): checker 
+                for checker in checkers
+            }
+            
+            for future in as_completed(future_to_checker):
+                checker = future_to_checker[future]
+                try:
+                    results = future.result()
+                    # Process results
+                    for result in results:
+                        container = result.container_number
+                        if result.terminal != "NOT FOUND":
+                            container_results[container] = [result]
+                        elif container not in container_results:
+                            container_results[container] = [result]
+                except Exception as e:
+                    logger.error(f"Error checking containers at {checker.terminal_name}: {str(e)}")
+    else:
+        # Sequential processing (original logic)
+        remaining_containers = container_numbers.copy()
+        
+        for checker in checkers:
+            try:
+                if not remaining_containers:
+                    break
+                    
+                logger.info(f"Checking containers at {checker.terminal_name}")
+                results = checker.check_containers(remaining_containers)
                 
-            logger.info(f"Checking containers at {checker.terminal_name}")
-            results = checker.check_containers(remaining_containers)
-            
-            # Process results and update remaining containers
-            new_remaining = remaining_containers.copy()
-            for result in results:
-                container = result.container_number
-                # If container is found (not marked as NOT FOUND), remove it from remaining list
-                if result.terminal != "NOT FOUND":
-                    if container in new_remaining:
-                        new_remaining.remove(container)
-                    # Update or add the result to container_results
-                    container_results[container] = [result]
-                else:
-                    # Only add NOT FOUND result if container hasn't been found yet
-                    if container not in container_results:
+                # Process results and update remaining containers
+                new_remaining = remaining_containers.copy()
+                for result in results:
+                    container = result.container_number
+                    if result.terminal != "NOT FOUND":
+                        if container in new_remaining:
+                            new_remaining.remove(container)
                         container_results[container] = [result]
-            
-            remaining_containers = new_remaining
-            logger.info(f"Completed checking at {checker.terminal_name}")
-            logger.info(f"Remaining containers to check: {remaining_containers}")
-            
-        except Exception as e:
-            logger.error(f"Error checking containers at {checker.terminal_name}: {str(e)}")
-        finally:
-            if checker.driver:
-                checker.driver.quit()
+                    elif container not in container_results:
+                        container_results[container] = [result]
+                
+                remaining_containers = new_remaining
+                logger.info(f"Completed checking at {checker.terminal_name}")
+                logger.info(f"Remaining containers to check: {remaining_containers}")
+                
+            except Exception as e:
+                logger.error(f"Error checking containers at {checker.terminal_name}: {str(e)}")
+            finally:
+                if checker.driver:
+                    checker.driver.quit()
     
     # Output results
     if args.output == 'csv':
