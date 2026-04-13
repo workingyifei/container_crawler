@@ -25,7 +25,7 @@ A Python-based automation tool that checks container statuses across three termi
 ### Usage
 
 ```bash
-python container_status_checker.py CONTAINER_NUMBER [CONTAINER_NUMBER2 ...]
+python -m container_checker.cli CONTAINER_NUMBER [CONTAINER_NUMBER2 ...]
 ```
 
 Optional arguments:
@@ -35,10 +35,15 @@ Optional arguments:
 
 ### Environment Variables
 
-Set these environment variables for terminal access:
+Copy the example file and fill in your credentials:
 ```bash
-STO_USERNAME=your_username
-STO_PASSWORD=your_password
+cp credentials.example.env .env
+```
+
+Then set these values in `.env`:
+```bash
+STE_USERNAME=your_username
+STE_PASSWORD=your_password
 OICT_USERNAME=your_username
 OICT_PASSWORD=your_password
 ```
@@ -57,15 +62,8 @@ Automates warehouse management operations by integrating with the warehouse mana
 
 ### Requirements
 
-- Python 3.6+
+- Python 3.9+
 - Chrome WebDriver
-- Required Python packages:
-  ```
-  selenium
-  pandas
-  tabulate
-  logging
-  ```
 
 ### Installation
 
@@ -74,12 +72,21 @@ Automates warehouse management operations by integrating with the warehouse mana
 git clone [repository_url]
 ```
 
-2. Install required packages:
+2. Create environment and install dependencies (recommended):
 ```bash
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
+```
+
+Alternative with built-in tooling:
+```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-3. Set up environment variables for terminal access
+3. Set up `.env` from `credentials.example.env`
 
 ### Common Issues & Solutions
 
