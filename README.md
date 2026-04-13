@@ -48,6 +48,12 @@ OICT_USERNAME=your_username
 OICT_PASSWORD=your_password
 ```
 
+For WMS + Google Drive upload, use a file path (not inline JSON):
+```bash
+WMS_GDRIVE_SERVICE_ACCOUNT_FILE=secrets/gdrive-sa.json
+WMS_GDRIVE_FILE_ID=your_google_drive_file_id
+```
+
 ## 2. WMS Integration Script
 
 Automates warehouse management operations by integrating with the warehouse management system (WMS):
@@ -87,6 +93,43 @@ pip install -r requirements.txt
 ```
 
 3. Set up `.env` from `credentials.example.env`
+
+### Google Drive Credentials (Recommended)
+
+Use a path-based secret pattern for Google service-account credentials:
+
+1. Keep the JSON key outside source control, for example at `secrets/gdrive-sa.json`
+2. Set `WMS_GDRIVE_SERVICE_ACCOUNT_FILE=secrets/gdrive-sa.json`
+3. Ensure secret files are ignored by git and never committed
+
+For CI/deployment:
+
+1. Store the raw JSON in your CI secret store
+2. Write the secret to a temporary file at runtime
+3. Export `WMS_GDRIVE_SERVICE_ACCOUNT_FILE` to that temp path
+4. Delete the temp file after the job
+
+Example (GitHub Actions):
+```bash
+printf '%s' "${{ secrets.WMS_GDRIVE_SERVICE_ACCOUNT_JSON }}" > "$RUNNER_TEMP/gdrive-sa.json"
+export WMS_GDRIVE_SERVICE_ACCOUNT_FILE="$RUNNER_TEMP/gdrive-sa.json"
+python run.py
+rm -f "$RUNNER_TEMP/gdrive-sa.json"
+```
+
+### Secret Safety Guardrail
+
+Run the local secret scanner before committing:
+```bash
+scripts/check-secrets.sh
+```
+
+Optional git pre-commit hook:
+```bash
+ln -sf ../../scripts/check-secrets.sh .git/hooks/pre-commit
+```
+
+If a service-account key has ever been committed or shared, rotate it immediately in Google Cloud IAM and replace local/CI secrets with the new key.
 
 ### Common Issues & Solutions
 

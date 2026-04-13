@@ -16,14 +16,17 @@ from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from googleapiclient.http import MediaFileUpload
 
+from settings import get_wms_settings
+
 class WMS:
     def __init__(self) -> None:
-        # WMS credentials and URLs
-        self.username = 'example@domain.com'  # Example username
-        self.password = 'example_password'      # Example password
-        self.login_url = 'http://www.example.com/login'  # Example login URL
-        self.inbound_url = 'http://www.example.com/inbound'  # Example inbound URL
-        self.outbound_url = 'http://www.example.com/outbound'  # Example outbound URL
+        settings = get_wms_settings()
+
+        self.username = settings.username
+        self.password = settings.password
+        self.login_url = settings.login_url
+        self.inbound_url = settings.inbound_url
+        self.outbound_url = settings.outbound_url
         self.download_dir = os.getcwd()  # Change download path to current path
         self.driver = None
         self.setup_driver()
@@ -58,10 +61,10 @@ class WMS:
 
         # gdrive credentials
         self.scopes = ['https://www.googleapis.com/auth/drive']
-        self.service_account_file = '/path/to/service_account.json'  # Example service account file path
+        self.service_account_file = settings.gdrive_service_account_file
 
         # gdrive file ID
-        self.file_id = 'example_file_id' # Example file ID
+        self.file_id = settings.gdrive_file_id
         self.file_path = os.path.join(self.download_dir, 'inventory.xlsx')  # Update file path to current directory
         self.mime_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 

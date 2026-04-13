@@ -1,6 +1,8 @@
 .venv
 .env
 credentials.env
+secrets/
+secrets/*.json
 __pycache__
 *.xls
 *.xlsx
